@@ -13,11 +13,12 @@
   See the Chicago hockey analytics project at \code{github.com/mataddy/hockey}.}
 \value{
    \item{goal}{ Info about each goal scored.  }
-   \item{player}{ Player info: +1 for a home team player, -1 for an away
+   \item{onice}{ Matrix with entries for who was on the ice for each goal: +1 for a home team player, -1 for an away
 	 team player, zero otherwise. }
-   \item{onice}{ Special teams info. For example,
+   \item{config}{ Special teams info. For example,
    \code{S5v4} is a 5 on 4 powerplay,
    +1 if it is for the home-team and -1 for the away team.}
+   \item{player}{ Player info: names, most common position, and plus-minus.}
  }
 
 \references{Gramacy, Jensen, and Taddy (2013): "Estimating Player
@@ -31,21 +32,22 @@ Matt Taddy, \email{taddy@chicagobooth.edu}
 
 \examples{
 data(hockey)
-x <- cBind(onice,player)
-y <- as.numeric(goal$who=="HOME")
-fit <- gamlr(x=x, y=y, family="binomial", npen=10,
-            standardize=FALSE, varpen=1, verb=TRUE)
+x <- cBind(config,onice)
+y <- as.numeric(goal$whoscored=="HOME")
 
-## BIC selected coefficients
-sum( (B <- as.matrix(coef(fit))) !=0)
-round(B[order(-abs(B))[1:20],],2)
+## fit a lambda (gamma=0) model
+plot(fit <- gamlr(x=x, y=y, family="binomial",  
+      free=1:ncol(config), standardize=FALSE, 
+      thresh=1e-8))
 
-## fit plot
-plot(fit, col=c(rep("slategrey",ncol(onice)),
-                rep("darkorange",ncol(player))))
+## BIC selected player coefficients
+B <- coef(fit)[-c(1,1+1:ncol(config)),] 
+length(B <- B[B!=0])
+## print nonzero player effects on who-scored log odds
+round(B[order(-B)],3)
 
-## predict the last goal of the 2013 playoffs
+## predict the last goal of the 2013 playoffs (this time use AIC)
 goal[fit$n,]
-predict(fit,x[fit$n,,drop=FALSE],type="response")
+predict(fit,x[fit$n,,drop=FALSE],type="response",k=2)
 }
 \seealso{gamlr}

@@ -5,11 +5,13 @@
 ## Wrapper function; most happens in c
 gamlr <- function(x, y, 
             family=c("gaussian","binomial","poisson"),
-            varpen=0, npen=100, 
-            pen.start=Inf,  
-            pen.min.ratio=0.01, 
-            weight=NULL, standardize=TRUE, verb=FALSE,
-            thresh=1e-6, maxit=1e5, qn=FALSE)
+            gamma=0, nlambda=100, 
+            lambda.start=Inf,  
+            lambda.min.ratio=0.01, 
+            free=NULL, 
+            standardize=TRUE,doxx=FALSE,  
+            tol=1e-7, maxit=1e4,
+            verb=FALSE, ...)
 {
   on.exit(.C("gamlr_cleanup", PACKAGE = "gamlr"))
 
@@ -18,38 +20,67 @@ gamlr <- function(x, y,
   famid = switch(family, 
     "gaussian"=1, "binomial"=2, "poisson"=3)
 
-  ## data formatting
+  ## data formatting (more follows after doxx)
   y <- drop(y)
   stopifnot(is.null(dim(y)))
   if(is.factor(y)&family=="binomial") y <- as.numeric(y)-1
   y <- as.double(y)
   n <- length(y)
 
-  if(is.data.frame(x)) x <- as.matrix(x)
+  if(inherits(x,"data.frame")) x <- as.matrix(x)
+  if(inherits(x,"simple_triplet_matrix"))
+    x <- sparseMatrix(i=x$i,j=x$j,x=x$v,
+              dims=dim(x),dimnames=dimnames(x))
+
+  ## extras
+  xtr = list(...)
+
+  ## alias from glmnet terminology
+  if(!is.null(xtr$thresh)) tol = xtr$thresh
+
+  ## fixed shifts (mainly for poisson/dmr)
+  eta <- rep(0.0,n)
+  if(!is.null(xtr$fix)){
+    if(family=="gaussian") y = y-xtr$fix
+    else eta <- xtr$fix   } 
+  stopifnot(length(eta)==n)
+  eta <- as.double(eta)
+
+  ## precalc of x'x
+  if(doxx){
+    xx <- as(tcrossprod(t(x)),"matrix")
+    xx <- as(xx,"dspMatrix")
+    if(xx@uplo=="L") xx <- t(xx)
+    xxv <- as.double(xx@x)
+  } else{ xxv <- double(0) }
+
+  ## final x formatting
   x=as(x,"dgCMatrix") 
-  p <- ncol(x)
-  if(is.null(colnames(x))) colnames(x) <- 1:p
+  if(is.null(colnames(x))) 
+    colnames(x) <- 1:ncol(x)
   stopifnot(nrow(x)==n) 
+  p <- ncol(x)
 
-
-  ## precision weights
-  if(is.null(weight)) weight <- rep(1,p)
-  stopifnot(all(weight>=0) & length(weight)==p)
+  ## weight
+  if(!is.null(xtr$weight)){
+    weight <- xtr$weight
+  } else{ weight <- rep(1,p) }
+  weight[free] <- 0
   weight <- as.double(weight)
 
   ## check and clean all arguments
-  stopifnot(pen.min.ratio<=1)
-  stopifnot(all(c(npen,pen.min.ratio)>0))
-  stopifnot(all(c(pen.start,varpen)>=0))
-  stopifnot(all(c(thresh,maxit)>0))
-  if(is.infinite(varpen)){
-    npen=min(npen,sum(weight!=0)+1)
-    pen.start=Inf }
-  mu <- double(npen)
-  mu[1] <- pen.start
+  stopifnot(lambda.min.ratio<=1)
+  stopifnot(all(c(nlambda,lambda.min.ratio)>0))
+  stopifnot(all(c(lambda.start)>=0))
+  stopifnot(all(c(tol,maxit)>0))
+  lambda <- double(nlambda)
+  lambda[1] <- lambda.start
+
+  ## stepsize
+  delta <- exp( log(lambda.min.ratio)/(nlambda-1) )
 
   ## drop it like it's hot
-  fit <- .C("R_gamlr",
+  fit <- .C("gamlr",
             famid=as.integer(famid), 
             n=n,
             p=p,
@@ -58,59 +89,59 @@ gamlr <- function(x, y,
             xp=x@p,
             xv=as.double(x@x),
             y=y,
+            prexx=as.integer(doxx),
+            xxv=xxv,
+            eta=eta,
             weight=weight,
             standardize=as.integer(standardize>0),
-            npen=as.integer(npen),
-            pminratio=as.double(pen.min.ratio),
-            varpen=as.double(varpen),
-            thresh=as.double(thresh),
+            nlambda=as.integer(nlambda),
+            delta=as.double(delta),
+            gamma=as.double(gamma),
+            tol=as.double(tol),
             maxit=as.integer(maxit),
-            qn=as.integer(qn>0),
-            mu=mu,
-            deviance=double(npen),
-            df=double(npen),
-            alpha=as.double(rep(0,npen)),
-            beta=as.double(rep(0,npen*p)),
-            exits=integer(npen), 
+            lambda=as.double(lambda),
+            deviance=double(nlambda),
+            df=double(nlambda),
+            alpha=as.double(rep(0,nlambda)),
+            beta=as.double(rep(0,nlambda*p)),
+            exits=integer(nlambda), 
             verb=as.integer(verb>0),
             PACKAGE="gamlr",
             NAOK=TRUE,
             dup=FALSE)
 
   ## coefficients
-  npen <- fit$npen
-  if(npen == 0) stop("could not converge for any penalty.")
-  alpha <- head(fit$alpha,npen)
-  names(alpha) <- paste0('seg',(1:npen))
-  beta <- Matrix(head(fit$beta,npen*p),
-                    nrow=p, ncol=npen, 
+  nlambda <- fit$nlambda
+  if(nlambda == 0){
+    warning("could not converge for any lambda.")
+    nlambda <- 1
+    fit$deviance <- NA
+  }
+
+  alpha <- head(fit$alpha,nlambda)
+  names(alpha) <- paste0('seg',(1:nlambda))
+  beta <- Matrix(head(fit$beta,nlambda*p),
+                    nrow=p, ncol=nlambda, 
                     dimnames=list(colnames(x),names(alpha)),
                     sparse=TRUE)
+
   ## path stats
-  pen <- head(fit$mu,npen)
-  dev <- head(fit$deviance,npen)
-  df <- head(fit$df,npen)
-  exits <- head(fit$exits,npen)
-  names(df) <- names(dev) <- names(pen) <- names(alpha)
-
-  ## nonzero saturated poisson deviance
-  if(family=="poisson")
-    dev <- dev + 2*sum(ifelse(y>0,y*log(y),0) - y) 
-
-  if(is.infinite(varpen)) 
-    fit$weight <- weight+fit$weight
+  lambda <- head(fit$lambda,nlambda)
+  dev <- head(fit$deviance,nlambda)
+  df <- head(fit$df,nlambda)
+  names(df) <- names(dev) <- names(lambda) <- names(alpha)
 
   ## build return object and exit
-  out <- list(penalty=pen, 
-             varpen=fit$varpen,
-             weight=fit$weight, 
+  out <- list(lambda=lambda, 
+             gamma=fit$gamma,
              nobs=fit$n,
              family=family,
              alpha=alpha,
              beta=beta, 
              df=df,
              deviance=dev,
-             iterations=fit$maxit,
+             totalpass=fit$maxit,
+             free=free,
              call=match.call()) 
 
   class(out) <- "gamlr"
@@ -121,64 +152,84 @@ gamlr <- function(x, y,
 #### S3 method functions
 
 plot.gamlr <- function(x, against=c("pen","dev"), 
-                      col="navy",...)
+                      col="navy", 
+                      select=TRUE, df=TRUE, ...)
 {
-  npen <- ncol(x$beta)
+  nlambda <- ncol(x$beta)
   p <- nrow(x$beta)
   nzr <- unique(x$beta@i)+1
-  nzr <- nzr[x$weight[nzr]!=0 & is.finite(x$weight[nzr])]
+  nzr <- nzr[!(nzr%in%x$free)]
+  if(length(nzr)==0) return("nothing to plot")
   beta <- as.matrix(x$beta[nzr,,drop=FALSE])
 
-  if(length(col)==1) col <- rep(col,p)
-  col <- col[nzr]
+  if(!is.null(col)){
+    if(length(col)==1) col <- rep(col,p)
+    col <- col[nzr] }
+  else col <- 1:6 # matplot default
 
   against=match.arg(against)
   if(against=="pen"){
-      xv <- log(x$penalty)
-      xvn <- "log penalty"
+      xv <- log(x$lambda)
+      xvn <- "log lambda"
   } else if(against=="dev"){
       xv <- x$dev
       xvn <- "deviance"
   } else
     stop("unrecognized 'against' argument.")
 
+  if(!is.finite(xv[1])) stop("refusing to plot an unconverged fit")
+
   argl = list(...)
   if(is.null(argl$ylim)) argl$ylim=range(beta)
   if(is.null(argl$ylab)) argl$ylab="coefficient"
   if(is.null(argl$xlab)) argl$xlab=xvn
   if(is.null(argl$lty)) argl$lty=1
-  do.call(plot, c(list(x=xv, y=rep(0,npen), col="grey70", type="l"), argl))
+  if(is.null(argl$bty)) argl$bty="n"
+  do.call(plot, c(list(x=xv, y=rep(0,nlambda), col="grey70", type="l"), argl))
 
   matplot(xv, t(beta), col=col, add=TRUE, type="l", lty=argl$lty)
 
-  dfi <- unique(round(
-    seq(1,npen,length=ceiling(length(axTicks(1))))))
-  axis(3,at=log(x$penalty[dfi]), 
-    labels=round(x$df[dfi],1),tick=FALSE, line=-.5)
+  if(df){
+    dfi <- unique(round(
+      seq(1,nlambda,length=ceiling(length(axTicks(1))))))
+    axis(3,at=xv[dfi], labels=round(x$df[dfi],1),tick=FALSE, line=-.5) }
 
-  abline(v=log(x$penalty[which.min(BIC(x))]), 
-    lty=3, col="grey50")
+  if(select){
+    abline(v=xv[which.min(BIC(x))], lty=3, col="grey20")
+    abline(v=xv[which.min(AIC(x))], lty=3, col="grey20") }
 }
 
-coef.gamlr <- function(object, 
-  select=which.min(BIC(object)), ...){
-  if(is.null(select)) select <- 1:ncol(object$beta)
+coef.gamlr <- function(object, select=NULL, k=log(object$nobs), ...)
+{
+  if(length(select)==0)
+    select <- which.min(AIC(object,k=k))
+  else if(select==0)
+   select <- 1:ncol(object$beta)
+
+  select[select>ncol(object$beta)] <- ncol(object$beta)
   return(rBind(intercept=object$alpha[select], 
               object$beta[,select,drop=FALSE]))
 }
 
 predict.gamlr <- function(object, newdata,
-                    select=which.min(BIC(object)),
                     type = c("link", "response"), ...)
 {
-  stopifnot(inherits(newdata, c("matrix","Matrix")))
-  if(is.null(select)) select <- 1:ncol(object$beta)
-  
-  eta <- matrix(object$alpha[select],
+  if(inherits(newdata,"data.frame")) 
+    newdata <- as.matrix(newdata)
+  if(inherits(newdata,"simple_triplet_matrix"))
+    newdata <- sparseMatrix(
+                    i=newdata$i,
+                    j=newdata$j,
+                    x=newdata$v,
+                    dims=dim(newdata),
+                    dimnames=dimnames(newdata))
+
+  B <- coef(object, ...)
+  eta <- matrix(B[1,],
             nrow=nrow(newdata),
-            ncol=length(object$alpha[select]),
+            ncol=ncol(B),
             byrow=TRUE)
-  eta <- eta + newdata%*%object$beta[,select]
+  eta <- eta + newdata%*%B[-1,,drop=FALSE]
                               
   type=match.arg(type)
   if(object$family=="binomial" & type=="response")
@@ -193,7 +244,7 @@ summary.gamlr <- function(object, ...){
   print(object)
 
   return(data.frame(
-    pen=object$penalty,
+    lambda=object$lambda,
     par=diff(object$b@p)+1,
     df=object$df,
     r2=1-object$dev/object$dev[1],
@@ -203,8 +254,8 @@ summary.gamlr <- function(object, ...){
 print.gamlr <- function(x, ...){
   cat("\n")
   cat(sprintf(
-    "%s gamlr with %d inputs and %d segments.", 
-    x$family, nrow(x$beta), ncol(x$beta)))
+    "gamma = %g %s gamlr with %d inputs and %d segments.", 
+    x$gamma, x$family, nrow(x$beta), ncol(x$beta)))
   cat("\n\n")
 }
 
@@ -216,7 +267,6 @@ logLik.gamlr <- function(object, ...){
   ll
 }
 
-family.gamlr <- function(object, ...) object$family
 
 
 
