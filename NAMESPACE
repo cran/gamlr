@@ -1,0 +1,21 @@
+useDynLib(gamlr)
+
+import(slam)
+
+export(gamlr,
+       pve,
+       disp,
+       cvselect,
+       cvplot,
+       corr,
+       sdev,
+       freq,
+       tfidf,
+       normalize)
+
+S3method(coef,gamlr)
+S3method(print,gamlr)
+S3method(summary,gamlr)
+S3method(plot,gamlr)
+S3method(predict,gamlr)
+S3method(AIC,gamlr)
