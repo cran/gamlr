@@ -1,6 +1,6 @@
 Package: gamlr
 Title: Gamma Lasso Regression
-Version: 1.11
+Version: 1.11-1
 Date: 2013
 Author: Matt Taddy <taddy@chicagobooth.edu>  
 Maintainer: Matt Taddy <taddy@chicagobooth.edu>
@@ -11,7 +11,7 @@ URL: http://github.com/mataddy/gamlr
         http://faculty.chicagobooth.edu/matt.taddy/index.html
 References: Taddy (2013), The Gamma Lasso.
         http://arxiv.org/abs/1308.5623
-Packaged: 2013-11-01 15:11:07 UTC; taddy
+Packaged: 2013-11-03 13:31:32 UTC; mtaddy
 NeedsCompilation: yes
 Repository: CRAN
-Date/Publication: 2013-11-01 17:35:24
+Date/Publication: 2013-11-04 01:04:30
