@@ -67,6 +67,10 @@ void copy_dvec(double *v, double *orig, int n);
 void print_dvec(double *v, int n, FILE *outfile);
 double* drep(double val, int n);
 double normalize(double *v, int n);
+double dmin(double *v, int n);
+double dmax(double *v, int n);
+double dabsmin(double *v, int n);
+double dabsmax(double *v, int n);
 
 // 1D int array tools.
 

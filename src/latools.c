@@ -458,9 +458,33 @@ double normalize(double *v, int n){
     v[i] = v[i]/vsum;
   return vsum;
 }
+
+double dmin(double *v, int n){
+  double m = FP_INFINITE;
+  for(int i=0; i<n; i++) if(v[i]<m) m=v[i];
+  return m;
+}
+
+double dmax(double *v, int n){
+  double m = -FP_INFINITE;
+  for(int i=0; i<n; i++) if(v[i]>m) m=v[i];
+  return m;
+}
+
+double dabsmin(double *v, int n){
+  double m = FP_INFINITE;
+  for(int i=0; i<n; i++) if(fabs(v[i])<m) m = fabs(v[i]);
+  return m;
+}
+
+double dabsmax(double *v, int n){
+  double m = 0.0;
+  for(int i=0; i<n; i++) if(fabs(v[i])>m) m = fabs(v[i]);
+  return m;
+}
+
+
 /*****integer vector tools******/
-
-
 
 
 /*

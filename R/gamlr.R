@@ -1,149 +1,222 @@
-##### estimation for gamma-lasso penalized regression  ######
+##########################################################
+##### path estimation for log penalized regression  ######
+##########################################################
 
-## Wrapper function; most happens in .c and glpath
-gamlr <- function(covars, response, family="linear",
-                  free=NULL, scale=TRUE, fixe=NULL, store=TRUE,
-                  penvar=1, ortho=TRUE, step=NULL,
-                  stoparg=list(rule="BF",val=10),
-                  cdpar=list(tol=1e-5), verb=FALSE, ...)
+## Wrapper function; most happens in c
+gamlr <- function(x, y, 
+            family=c("gaussian","binomial","poisson"),
+            varpen=0, npen=100, 
+            pen.start=Inf,  
+            pen.min.ratio=0.01, 
+            weight=NULL, standardize=TRUE, verb=FALSE,
+            thresh=1e-6, maxit=1e5, qn=FALSE)
 {
-    on.exit(.C("gamlr_cleanup", PACKAGE = "gamlr"))
+  on.exit(.C("gamlr_cleanup", PACKAGE = "gamlr"))
 
-    ## check and clean all arguments
-    chk <- glcheck(covars=covars, response=response, family=family,
-                   fixe=fixe, scale=scale, free=free,
-                   cdpar=cdpar, verb=verb, store=store)
+  ## integer family codes
+  family=match.arg(family)
+  famid = switch(family, 
+    "gaussian"=1, "binomial"=2, "poisson"=3)
 
-    path <- c(list(...),
-              penvar=penvar, ortho=ortho, step=step, list(stoparg=stoparg))
-    out <- glpath(chk$xlist, chk$ylist, chk$algo, path)
+  ## data formatting
+  y <- drop(y)
+  stopifnot(is.null(dim(y)))
+  if(is.factor(y)&family=="binomial") y <- as.numeric(y)-1
+  y <- as.double(y)
+  n <- length(y)
 
-    ## add scaling info
-    out$scaled=scale
-    out$covarMean=chk$xlist$covarMean
-    out$covarSD=chk$xlist$covarSD
+  if(is.data.frame(x)) x <- as.matrix(x)
+  x=as(x,"dgCMatrix") 
+  p <- ncol(x)
+  if(is.null(colnames(x))) colnames(x) <- 1:p
+  stopifnot(nrow(x)==n) 
 
-    ## class and return
-    class(out) <- "gamlr"
-    invisible(out)
+
+  ## precision weights
+  if(is.null(weight)) weight <- rep(1,p)
+  stopifnot(all(weight>=0) & length(weight)==p)
+  weight <- as.double(weight)
+
+  ## check and clean all arguments
+  stopifnot(pen.min.ratio<=1)
+  stopifnot(all(c(npen,pen.min.ratio)>0))
+  stopifnot(all(c(pen.start,varpen)>=0))
+  stopifnot(all(c(thresh,maxit)>0))
+  if(is.infinite(varpen)){
+    npen=min(npen,sum(weight!=0)+1)
+    pen.start=Inf }
+  mu <- double(npen)
+  mu[1] <- pen.start
+
+  ## drop it like it's hot
+  fit <- .C("R_gamlr",
+            famid=as.integer(famid), 
+            n=n,
+            p=p,
+            l=length(x@i),
+            xi=x@i,
+            xp=x@p,
+            xv=as.double(x@x),
+            y=y,
+            weight=weight,
+            standardize=as.integer(standardize>0),
+            npen=as.integer(npen),
+            pminratio=as.double(pen.min.ratio),
+            varpen=as.double(varpen),
+            thresh=as.double(thresh),
+            maxit=as.integer(maxit),
+            qn=as.integer(qn>0),
+            mu=mu,
+            deviance=double(npen),
+            df=double(npen),
+            alpha=as.double(rep(0,npen)),
+            beta=as.double(rep(0,npen*p)),
+            exits=integer(npen), 
+            verb=as.integer(verb>0),
+            PACKAGE="gamlr",
+            NAOK=TRUE,
+            dup=FALSE)
+
+  ## coefficients
+  npen <- fit$npen
+  if(npen == 0) stop("could not converge for any penalty.")
+  alpha <- head(fit$alpha,npen)
+  names(alpha) <- paste0('seg',(1:npen))
+  beta <- Matrix(head(fit$beta,npen*p),
+                    nrow=p, ncol=npen, 
+                    dimnames=list(colnames(x),names(alpha)),
+                    sparse=TRUE)
+  ## path stats
+  pen <- head(fit$mu,npen)
+  dev <- head(fit$deviance,npen)
+  df <- head(fit$df,npen)
+  exits <- head(fit$exits,npen)
+  names(df) <- names(dev) <- names(pen) <- names(alpha)
+
+  ## nonzero saturated poisson deviance
+  if(family=="poisson")
+    dev <- dev + 2*sum(ifelse(y>0,y*log(y),0) - y) 
+
+  if(is.infinite(varpen)) 
+    fit$weight <- weight+fit$weight
+
+  ## build return object and exit
+  out <- list(penalty=pen, 
+             varpen=fit$varpen,
+             weight=fit$weight, 
+             nobs=fit$n,
+             family=family,
+             alpha=alpha,
+             beta=beta, 
+             df=df,
+             deviance=dev,
+             iterations=fit$maxit,
+             call=match.call()) 
+
+  class(out) <- "gamlr"
+  invisible(out)
 }
+ 
 
+#### S3 method functions
 
-###### implemented methods for gamlr objects ######
-
-## s3 plot function
-plot.gamlr<- function(x, against="logpen", select=NULL, ...)
+plot.gamlr <- function(x, against=c("pen","dev"), 
+                      col="navy",...)
 {
-  if(!is.null(x$path) && ncol(x$load)>1){
-    p <- ncol(x$load)
-    nzr <- unique(x$load$i)
-    nzr <- nzr[!(nzr%in%x$free)]
-    cols <- rainbow(length(nzr))
-    names(cols) <- nzr
-    if(against=="segment"){
-      xv <- 1:p
-      xvn <- "path segment"
-    } else if(against=="pve"){
-      xv <- x$pve
-      xvn <- "pve"
-    } else if(against=="pen"){
-      xv <- 1/x$penalty
-      xvn <- "1/E[lambda]"
-    } else if(against=="logpen"){
-      xv <- log(1/x$penalty)
-      xvn <- "-log(E[lambda])"
-    } else
-    stop("unrecognized 'against' argument.  options are pve,pen,logpen.")
+  npen <- ncol(x$beta)
+  p <- nrow(x$beta)
+  nzr <- unique(x$beta@i)+1
+  nzr <- nzr[x$weight[nzr]!=0 & is.finite(x$weight[nzr])]
+  beta <- as.matrix(x$beta[nzr,,drop=FALSE])
 
-    argl = list(...)
-    if(is.null(argl$ylim)) argl$ylim=range(x$load[nzr,])
-    if(is.null(argl$ylab)) argl$ylab="loading"
-    if(is.null(argl$xlab)) argl$xlab=xvn
-    if(!is.null(argl$col)){
-      cols[1:length(cols)] <- argl$col
-      argl$col <- NULL }
-    do.call(plot, c(list(x=xv, y=rep(0,p), col="grey70", type="l"), argl))
-    for(i in nzr) lines(xv, c(as.matrix(x$load[i,])), col=cols[paste(i)])
+  if(length(col)==1) col <- rep(col,p)
+  col <- col[nzr]
 
-    if(!is.null(select)){
-      seli <- glselect(x, select)
-      abline(v=xv[seli],col="grey20",lty=2) }
+  against=match.arg(against)
+  if(against=="pen"){
+      xv <- log(x$penalty)
+      xvn <- "log penalty"
+  } else if(against=="dev"){
+      xv <- x$dev
+      xvn <- "deviance"
   } else
-  plot(x$fitted ~ x$response, ...)
+    stop("unrecognized 'against' argument.")
+
+  argl = list(...)
+  if(is.null(argl$ylim)) argl$ylim=range(beta)
+  if(is.null(argl$ylab)) argl$ylab="coefficient"
+  if(is.null(argl$xlab)) argl$xlab=xvn
+  if(is.null(argl$lty)) argl$lty=1
+  do.call(plot, c(list(x=xv, y=rep(0,npen), col="grey70", type="l"), argl))
+
+  matplot(xv, t(beta), col=col, add=TRUE, type="l", lty=argl$lty)
+
+  dfi <- unique(round(
+    seq(1,npen,length=ceiling(length(axTicks(1))))))
+  axis(3,at=log(x$penalty[dfi]), 
+    labels=round(x$df[dfi],1),tick=FALSE, line=-.5)
+
+  abline(v=log(x$penalty[which.min(BIC(x))]), 
+    lty=3, col="grey50")
 }
 
-## S3 method coef function
-coef.gamlr <- function(object, origscale=TRUE, select=NULL, ...){
-  if(!is.null(select) && !is.null(object$path)){
-    seli <- glselect(object,select)
-    loads <- object$loadings[,seli]
-    ind <- loads$i
-    coef <- matrix(c(object$intercept[seli],loads$v),
-                   dimnames=list(c("intercept", rownames(loads)[ind])))
-  } else{
-    ind <- 1:(ncol(object$X))
-    coef <- rbind(matrix(object$intercept,nrow=1,dimnames=list("intercept")),
-                  as.matrix(object$loadings)) }
-
-  if(origscale && !is.null(object$covarSD)){
-    coef[-1,] <-  coef[-1,]/object$covarSD[ind]
-    coef[1,] <- coef[1,] - col_sums(object$covarMean[ind]*coef[-1,,drop=FALSE])
-  }
-  return( coef )
+coef.gamlr <- function(object, 
+  select=which.min(BIC(object)), ...){
+  if(is.null(select)) select <- 1:ncol(object$beta)
+  return(rBind(intercept=object$alpha[select], 
+              object$beta[,select,drop=FALSE]))
 }
 
-## S3 method predict function
-predict.gamlr <- function(object, newdata, select=NULL, ...)
+predict.gamlr <- function(object, newdata,
+                    select=which.min(BIC(object)),
+                    type = c("link", "response"), ...)
 {
-  p <- nrow(object$loadings)
-  if(is.vector(newdata))
-    newdata <- matrix(newdata, nrow=1)
+  stopifnot(inherits(newdata, c("matrix","Matrix")))
+  if(is.null(select)) select <- 1:ncol(object$beta)
+  
+  eta <- matrix(object$alpha[select],
+            nrow=nrow(newdata),
+            ncol=length(object$alpha[select]),
+            byrow=TRUE)
+  eta <- eta + newdata%*%object$beta[,select]
+                              
+  type=match.arg(type)
+  if(object$family=="binomial" & type=="response")
+    return(apply(eta,2,function(c) 1/(1+exp(-c))))
+  if(object$family=="poisson" & type=="response")
+    return(apply(eta,2,exp))
 
-  if(ncol(newdata)!=p)
-    stop(sprintf("newdata must be a matrix with %d columns",p))
-
-  newdata <- as.simple_triplet_matrix(cbind(rep(1,nrow(newdata)),newdata))
-
-  B <- coef(object, select=select, ...)
-
-  if(!is.null(select)){
-    BS <- rep(0,p+1)
-    names(BS) <- c("intercept",rownames(object$loadings))
-    BS[rownames(B)] <- B
-    B <- matrix(BS)
-  } else{ colnames(B) <- object$penalty }
-
-  return(tcrossprod_simple_triplet_matrix(newdata, t(B)))
+  return(eta)
 }
 
-
-## S3 method summary function
-summary.gamlr <- function(object,   top=20, ...){
+summary.gamlr <- function(object, ...){
   print(object)
 
-  if(!is.null(object$path) && length(object$load$v)>0){
-    bnames <- names(object$order)[1:min(length(object$order),top)]
-    bsign <- rep(" ",length(bnames))
-    bsign[as.matrix(object$load[bnames,ncol(object$load)]>0)] <- "+"
-    bsign[as.matrix(object$load[bnames,ncol(object$load)]<0)] <- "-"
-
-    cat(" Top variables by order of entry: \n  ")
-    cat(paste(bsign,bnames,'\n '))
-    cat("\n")
-  }
+  return(data.frame(
+    pen=object$penalty,
+    par=diff(object$b@p)+1,
+    df=object$df,
+    r2=1-object$dev/object$dev[1],
+    bic=BIC(object)))
 }
 
 print.gamlr <- function(x, ...){
-  cat(sprintf("\n %s gamlr object with ", x$family))
-  if(ncol(x$load)==1)
-    cat(sprintf("%g%% nonzero coefficients. PVE = %g \n\n",
-                round(100*length(x$loadings$v)/nrow(x$loadings),2),
-                round(x$pve,2)))
-  else cat(sprintf("%d path segments. \n",  ncol(x$load)))
+  cat("\n")
+  cat(sprintf(
+    "%s gamlr with %d inputs and %d segments.", 
+    x$family, nrow(x$beta), ncol(x$beta)))
+  cat("\n\n")
 }
 
+logLik.gamlr <- function(object, ...){
+  ll <- -0.5*object$dev
+  attr(ll,"nobs") = object$nobs
+  attr(ll,"df") = object$df
+  class(ll) <- "logLik"
+  ll
+}
 
-## AIC
-AIC.gamlr <- function(object, ..., k=2)
-  return(-2*object$llhd + k*object$df)
+family.gamlr <- function(object, ...) object$family
+
+
 
