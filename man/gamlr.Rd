@@ -12,13 +12,13 @@ gamlr(x, y,
    gamma=0,
    nlambda=100, lambda.start=Inf,  
    lambda.min.ratio=0.01, free=NULL, 
-   standardize=TRUE, doxx=FALSE,
+   standardize=TRUE, doxx=n>0.5*(p^2),
    tol=1e-7, maxit=1e4,
    verb=FALSE, ...)
 
 \method{plot}{gamlr}(x, against=c("pen","dev"), 
     col="navy", select=TRUE, df=TRUE, ...)
-\method{coef}{gamlr}(object, select=NULL, k=log(object$nobs), ...)
+\method{coef}{gamlr}(object, select=NULL, k=2, ...)
 \method{predict}{gamlr}(object, newdata,
             type = c("link", "response"), ...)
 \method{logLik}{gamlr}(object, ...)
@@ -65,11 +65,11 @@ gamlr(x, y,
   \item{against}{ Whether to plot paths 
   against log penalty or deviance.}
 \item{select}{ In \code{coef} (and \code{predict}, which calls \code{coef}), the index of path segments
-  for which you want coefficients or prediction.  If null, the segments are selected via \code{AIC} with \code{k} as specified.  If \code{select=0} all segments are returned.
+  for which you want coefficients or prediction (e.g., do \code{select=which.min(BIC(object))} for BIC selection).  If null, the segments are selected via our \emph{corrected} \code{AICc} function with \code{k} as specified.  If \code{select=0} all segments are returned.
 
   In \code{plot},
-  \code{select} is just a flag for whether to add lines marking AIC and BIC selected models.}
-\item{k}{ If \code{select=NULL} in \code{coef} or \code{predict}, the \code{AIC} complexity penalty.  \code{k} defaults to the BIC's log(n). }
+  \code{select} is just a flag for whether to add lines marking AICc and BIC selected models.}
+\item{k}{ If \code{select=NULL} in \code{coef} or \code{predict}, the \code{AICc} complexity penalty.  \code{k} defaults to the usual 2. }
 \item{newdata}{ New \code{x} data for prediction.}
 \item{type}{ Either "link" for the linear equation, 
 or "response" for predictions transformed 
@@ -91,7 +91,7 @@ to the same domain as \code{y}.}
   set as \eqn{1/(1+\gamma|b_j^{t-1}|)} where \eqn{b_j^{t-1}} is our estimate of \eqn{\beta_j} for the previous path segment (or zero if \eqn{t=0}).  This adaptation is what makes the penalization `concave'; see Taddy (2013) for details.
 
       \code{plot.gamlr} can be used to graph the results: it 
-      shows the regularization paths for penalized \eqn{\beta}, with degrees of freedom along the top axis, and marks  minimum AIC and BIC models.  
+      shows the regularization paths for penalized \eqn{\beta}, with degrees of freedom along the top axis, and marks  minimum AICc and BIC models.  
 }
 \value{
   \item{lambda}{The path of fitted \emph{prior expected} L1 penalties.}

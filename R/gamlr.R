@@ -5,12 +5,15 @@
 ## Wrapper function; most happens in c
 gamlr <- function(x, y, 
             family=c("gaussian","binomial","poisson"),
-            gamma=0, nlambda=100, 
+            gamma=0, 
+            nlambda=100, 
             lambda.start=Inf,  
             lambda.min.ratio=0.01, 
             free=NULL, 
-            standardize=TRUE,doxx=FALSE,  
-            tol=1e-7, maxit=1e4,
+            standardize=TRUE, 
+            doxx=n>0.5*(p^2),  
+            tol=1e-7, 
+            maxit=1e4,
             verb=FALSE, ...)
 {
   on.exit(.C("gamlr_cleanup", PACKAGE = "gamlr"))
@@ -27,10 +30,12 @@ gamlr <- function(x, y,
   y <- as.double(y)
   n <- length(y)
 
+  if(inherits(x,"numeric")) x <- matrix(x)
   if(inherits(x,"data.frame")) x <- as.matrix(x)
   if(inherits(x,"simple_triplet_matrix"))
     x <- sparseMatrix(i=x$i,j=x$j,x=x$v,
               dims=dim(x),dimnames=dimnames(x))
+  p <- ncol(x)
 
   ## extras
   xtr = list(...)
@@ -38,7 +43,7 @@ gamlr <- function(x, y,
   ## alias from glmnet terminology
   if(!is.null(xtr$thresh)) tol = xtr$thresh
 
-  ## fixed shifts (mainly for poisson/dmr)
+  ## fixed shifts for poisson
   eta <- rep(0.0,n)
   if(!is.null(xtr$fix)){
     if(family=="gaussian") y = y-xtr$fix
@@ -46,27 +51,39 @@ gamlr <- function(x, y,
   stopifnot(length(eta)==n)
   eta <- as.double(eta)
 
+  ## observation weights
+  if(!is.null(xtr$obsweight)){
+    obsweight <- xtr$obsweight
+    stopifnot(all(obsweight>0))
+    stopifnot(length(obsweight)==n)
+  } else obsweight <- as.double(rep(1,n))
+
   ## precalc of x'x
+  doxx = doxx & (family=="gaussian")
   if(doxx){
-    xx <- as(tcrossprod(t(x)),"matrix")
-    xx <- as(xx,"dspMatrix")
+    if(is.null(xtr$xx))
+      xtr$xx <- as(
+        tcrossprod(t(x*sqrt(obsweight))),
+        "matrix")
+    xx <- as(xtr$xx,"dspMatrix")
     if(xx@uplo=="L") xx <- t(xx)
-    xxv <- as.double(xx@x)
-  } else{ xxv <- double(0) }
+    xx <- as.double(xx@x)
+  } else xx <- double(0) 
 
   ## final x formatting
   x=as(x,"dgCMatrix") 
   if(is.null(colnames(x))) 
-    colnames(x) <- 1:ncol(x)
+    colnames(x) <- 1:p
   stopifnot(nrow(x)==n) 
-  p <- ncol(x)
 
-  ## weight
-  if(!is.null(xtr$weight)){
-    weight <- xtr$weight
-  } else{ weight <- rep(1,p) }
-  weight[free] <- 0
-  weight <- as.double(weight)
+  ## variable weights
+  if(!is.null(xtr$varweight)){
+    varweight <- xtr$varweight
+    stopifnot(all(varweight>=0))
+    stopifnot(length(varweight)==p)
+  } else{ varweight <- rep(1,p) }
+  varweight[free] <- 0
+  varweight <- as.double(varweight)
 
   ## check and clean all arguments
   stopifnot(lambda.min.ratio<=1)
@@ -89,10 +106,11 @@ gamlr <- function(x, y,
             xp=x@p,
             xv=as.double(x@x),
             y=y,
-            prexx=as.integer(doxx),
-            xxv=xxv,
+            doxx=as.integer(doxx),
+            xx=xx,
             eta=eta,
-            weight=weight,
+            varweight=varweight,
+            obsweight=obsweight,
             standardize=as.integer(standardize>0),
             nlambda=as.integer(nlambda),
             delta=as.double(delta),
@@ -142,7 +160,7 @@ gamlr <- function(x, y,
              deviance=dev,
              totalpass=fit$maxit,
              free=free,
-             call=match.call()) 
+             call=sys.call(1)) 
 
   class(out) <- "gamlr"
   invisible(out)
@@ -156,9 +174,10 @@ plot.gamlr <- function(x, against=c("pen","dev"),
                       select=TRUE, df=TRUE, ...)
 {
   nlambda <- ncol(x$beta)
-  p <- nrow(x$beta)
+  if(!is.null(x$free)) 
+    x$beta <- x$beta[-x$free,,drop=FALSE]
+  p <- nrow(x$beta) 
   nzr <- unique(x$beta@i)+1
-  nzr <- nzr[!(nzr%in%x$free)]
   if(length(nzr)==0) return("nothing to plot")
   beta <- as.matrix(x$beta[nzr,,drop=FALSE])
 
@@ -196,13 +215,14 @@ plot.gamlr <- function(x, against=c("pen","dev"),
 
   if(select){
     abline(v=xv[which.min(BIC(x))], lty=3, col="grey20")
-    abline(v=xv[which.min(AIC(x))], lty=3, col="grey20") }
+    abline(v=xv[which.min(AICc(x))], lty=3, col="grey20")
+  }
 }
 
-coef.gamlr <- function(object, select=NULL, k=log(object$nobs), ...)
+coef.gamlr <- function(object, select=NULL, k=2, ...)
 {
   if(length(select)==0)
-    select <- which.min(AIC(object,k=k))
+    select <- which.min(AICc(object,k=k))
   else if(select==0)
    select <- 1:ncol(object$beta)
 
