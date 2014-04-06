@@ -24,6 +24,7 @@ gamlr <- function(x, y,
     "gaussian"=1, "binomial"=2, "poisson"=3)
 
   ## data formatting (more follows after doxx)
+  if(is.data.frame(y)) y <- as.matrix(y)
   y <- drop(y)
   stopifnot(is.null(dim(y)))
   if(is.factor(y)&family=="binomial") y <- as.numeric(y)-1
@@ -37,6 +38,8 @@ gamlr <- function(x, y,
               dims=dim(x),dimnames=dimnames(x))
   p <- ncol(x)
 
+  if(length(free)==0) free <- NULL
+  
   ## extras
   xtr = list(...)
 
@@ -96,6 +99,15 @@ gamlr <- function(x, y,
   ## stepsize
   delta <- exp( log(lambda.min.ratio)/(nlambda-1) )
 
+  ## adaptation
+  stopifnot(all(gamma>=0))
+  if(length(gamma)==1){ 
+    gamvec <- rep(gamma,p)
+  } else{ 
+    gamvec <- gamma }
+  stopifnot(length(gamvec)==p)
+  gamvec[free] <- 0
+
   ## drop it like it's hot
   fit <- .C("gamlr",
             famid=as.integer(famid), 
@@ -114,7 +126,7 @@ gamlr <- function(x, y,
             standardize=as.integer(standardize>0),
             nlambda=as.integer(nlambda),
             delta=as.double(delta),
-            gamma=as.double(gamma),
+            gamma=gamvec,
             tol=as.double(tol),
             maxit=as.integer(maxit),
             lambda=as.double(lambda),
@@ -151,7 +163,7 @@ gamlr <- function(x, y,
 
   ## build return object and exit
   out <- list(lambda=lambda, 
-             gamma=fit$gamma,
+             gamma=gamma,
              nobs=fit$n,
              family=family,
              alpha=alpha,
@@ -170,7 +182,7 @@ gamlr <- function(x, y,
 #### S3 method functions
 
 plot.gamlr <- function(x, against=c("pen","dev"), 
-                      col="navy", 
+                      col=NULL, 
                       select=TRUE, df=TRUE, ...)
 {
   nlambda <- ncol(x$beta)
@@ -214,8 +226,7 @@ plot.gamlr <- function(x, against=c("pen","dev"),
     axis(3,at=xv[dfi], labels=round(x$df[dfi],1),tick=FALSE, line=-.5) }
 
   if(select){
-    abline(v=xv[which.min(BIC(x))], lty=3, col="grey20")
-    abline(v=xv[which.min(AICc(x))], lty=3, col="grey20")
+    abline(v=xv[which.min(AICc(x))], lty=2, col="grey20")
   }
 }
 
@@ -268,7 +279,7 @@ summary.gamlr <- function(object, ...){
     par=diff(object$b@p)+1,
     df=object$df,
     r2=1-object$dev/object$dev[1],
-    bic=BIC(object)))
+    aicc=AICc(object)))
 }
 
 print.gamlr <- function(x, ...){
@@ -280,7 +291,9 @@ print.gamlr <- function(x, ...){
 }
 
 logLik.gamlr <- function(object, ...){
-  ll <- -0.5*object$dev
+  if(object$family=="gaussian"){
+    ll <- -0.5*object$nobs*log(object$dev/object$nobs)
+  } else{ ll <- -0.5*object$dev }
   attr(ll,"nobs") = object$nobs
   attr(ll,"df") = object$df
   class(ll) <- "logLik"

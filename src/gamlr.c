@@ -22,24 +22,26 @@ double *xv = NULL;
 int *xi = NULL;
 int *xp = NULL;
 double *W = NULL;
+double *V = NULL;
+double *gam = NULL;
 
 double *xxv = NULL;
 int doxx;
 
 // variables to be created
+double *omega = NULL;
 unsigned int fam;
 double A;
 double *B = NULL;
 double *E = NULL;
 double *Z = NULL;
-double *V = NULL;
 double *vxbar = NULL;
 double *vxz = NULL;
 double vsum;
 
 unsigned int itertotal,npass;
 
-double gam,l1pen;
+double l1pen;
 
 double ysum,ybar;
 double *xbar = NULL;
@@ -67,6 +69,7 @@ void gamlr_cleanup(){
   if(H){ free(H); H = NULL; }
   if(ag0){ free(ag0); ag0 = NULL; }
 
+  if(omega){ free(omega); omega = NULL; }
   if(Z){ free(Z); Z = NULL; }
   if(vxbar){ free(vxbar); vxbar = NULL; }
   if(vxz){ free(vxz); vxz = NULL; }
@@ -83,7 +86,7 @@ double dof(int s, double *lam, double L){
   //calculate absolute grads
   for(j=0; j<p; j++)
     if(isfinite(W[j]) & (B[j]==0.0))
-      ag0[j] = fabs(G[j])/xsd[j];
+      ag0[j] = fabs(G[j])/(xsd[j]*W[j]);
 
   // initialization  
   if(s==0){
@@ -96,26 +99,19 @@ double dof(int s, double *lam, double L){
 
   double df = df0;
 
-  // lasso 
-  if(gam==0.0){
-    for(j=0; j<p; j++)
-      if( (B[j]!=0.0) | (W[j]==0.0) ) df ++;
-    return df;
-  }
-  // gamma lasso
+  // penalized bit
   double shape,phi;
   if(fam==1) phi = L*2/nd; 
   else phi = 1.0;
-  for(j=0; j<p; j++){
-    if(W[j]==0.0) df++;
-    else if(isfinite(W[j])){
-      shape = lam[s]*nd/gam;
-      df += pgamma(ag0[j], 
-                    shape/phi, 
-                    phi*gam, 
-                    1, 0); 
+  for(j=0; j<p; j++)
+    if(isfinite(W[j])){
+      if( (gam[j]==0.0) | (W[j]==0.0) ){  
+        if( (B[j]!=0.0) ) df ++;
+      } else{ // gamma lasso
+        shape = lam[s]*nd/gam[j];
+        df += pgamma(ag0[j], shape/phi, phi*gam[j], 1, 0); 
+      }
     }
-  }
 
   return df;
 }
@@ -129,9 +125,9 @@ double Bmove(int j)
   // unpenalized
   if(W[j]==0.0) dbet = -G[j]/H[j]; 
   else{
-    // penalty is lam[s]*nd*W[j]*fabs(B[j])*xsd[j].
+    // penalty is lam[s]*nd*W[j]*omega[j]*fabs(B[j])*xsd[j].
     double pen,ghb;
-    pen = xsd[j]*l1pen*W[j];
+    pen = xsd[j]*l1pen*W[j]*omega[j];
     ghb = (G[j] - H[j]*B[j]);
     if(fabs(ghb) < pen) dbet = -B[j];
     else dbet = -(G[j]-sign(ghb)*pen)/H[j];
@@ -282,7 +278,7 @@ int cdsolve(double tol, int M)
             int *standardize, // whether to scale penalty by sd(x_j)
             int *nlam, // length of the path
             double *delta, // path stepsize
-            double *penscale,  // gamma in the GL paper
+            double *gamvec,  // gamma in the GL paper
             double *thresh,  // cd convergence
             int *maxit, // cd max iterations 
             double *lambda, // output lambda
@@ -323,6 +319,7 @@ int cdsolve(double tol, int M)
   xxv = xxv_in;
   H = new_dvec(p);
   W = varweight;
+  omega = drep(1.0,p);  // gamma lasso adaptations
   V = obsweight;
   Z = new_dup_dvec(Y,n);
   vxbar = new_dvec(p);
@@ -342,11 +339,11 @@ int cdsolve(double tol, int M)
   B = new_dzero(p);
   G = new_dzero(p);
   ag0 = new_dzero(p);
-  gam = *penscale;
+  gam = gamvec;
   npass = itertotal = 0;
 
   // some local variables
-  double Lold, NLLHD, Lsat;
+  double Lold, NLLHD, NLsat;
   int s;
 
   // family dependent settings
@@ -356,21 +353,21 @@ int cdsolve(double tol, int M)
       nllhd = &bin_nllhd;
       reweight = &bin_reweight;
       A = log(ybar/(1-ybar));
-      Lsat = 0.0;
+      NLsat = 0.0;
       break;
     case 3:
       nllhd = &po_nllhd;
       reweight = &po_reweight;
       A = log(ybar);
-      // nonzero saturated deviance
-      Lsat = ysum;
+      // nonzero saturated negative log likelihood
+      NLsat = ysum;
       for(int i=0; i<n; i++)
-        if(Y[i]!=0) Lsat += -Y[i]*log(Y[i]);
+        if(Y[i]!=0) NLsat += -Y[i]*log(Y[i]);
       break;
     default: 
       fam = 1; // if it wasn't already
       nllhd = &sse;
-      Lsat=0.0;
+      NLsat=0.0;
       A = intercept(n, E, V, Z, vsum);
       for(int j=0; j<p; j++) dograd(j);
   }
@@ -397,7 +394,7 @@ int cdsolve(double tol, int M)
     itertotal += npass;
     Lold = NLLHD;
     NLLHD =  nllhd(n, A, E, Y, V);
-    deviance[s] = 2.0*(NLLHD - Lsat);
+    deviance[s] = 2.0*(NLLHD - NLsat);
     df[s] = dof(s, lambda, NLLHD);
     alpha[s] = A;
     copy_dvec(&beta[s*p],B,p);
@@ -406,13 +403,13 @@ int cdsolve(double tol, int M)
     
     // gamma lasso updating
     for(int j=0; j<p; j++) 
-      if(isfinite(gam)){
-        if( (W[j]>0.0) & isfinite(W[j]) )
-          W[j] = 1.0/(1.0+gam*fabs(B[j]));
-      } else if(B[j]!=0.0){
-        W[j] = 0.0;
+      if(gam[j]>0.0){
+        if(isfinite(gam[j])){
+          if( (W[j]>0.0) & isfinite(W[j]) )
+            omega[j] = 1.0/(1.0+gam[j]*fabs(B[j])); } 
+        else if(B[j]!=0.0) omega[j] = 0.0; 
       }
-
+      
     // verbalize
     if(*verb) 
       speak("segment %d: lambda = %.4g, dev = %.4g, npass = %d\n", 
