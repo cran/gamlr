@@ -11,7 +11,9 @@ gamlr <- function(x, y,
             lambda.min.ratio=0.01, 
             free=NULL, 
             standardize=TRUE, 
-            doxx=n>0.5*(p^2),  
+            obsweight=NULL,
+            varweight=NULL,
+            prexx=(p<500),  
             tol=1e-7, 
             maxit=1e4,
             verb=FALSE, ...)
@@ -23,30 +25,30 @@ gamlr <- function(x, y,
   famid = switch(family, 
     "gaussian"=1, "binomial"=2, "poisson"=3)
 
-  ## data formatting (more follows after doxx)
-  if(is.data.frame(y)) y <- as.matrix(y)
-  y <- drop(y)
-  stopifnot(is.null(dim(y)))
-  if(is.factor(y)&family=="binomial") y <- as.numeric(y)-1
-  y <- as.double(y)
+  ## data checking (more follows)
+  y <- checky(y,family)
   n <- length(y)
 
-  if(inherits(x,"numeric")) x <- matrix(x)
-  if(inherits(x,"data.frame")) x <- as.matrix(x)
-  if(inherits(x,"simple_triplet_matrix"))
-    x <- sparseMatrix(i=x$i,j=x$j,x=x$v,
-              dims=dim(x),dimnames=dimnames(x))
-  p <- ncol(x)
+  # observation weights
+  if(!is.null(obsweight))
+    if(family!="gaussian"){ 
+      warning("non-null obsweight are ignored for family!=gaussian")
+      obsweight <- NULL }
+  if(is.null(obsweight)) obsweight <- rep(1,n)
+  stopifnot(all(obsweight>0))
+  stopifnot(length(obsweight)==n)
 
-  if(length(free)==0) free <- NULL
-  
   ## extras
   xtr = list(...)
 
-  ## alias from glmnet terminology
+  ## aliases from glmnet or previous gamlr terminology
   if(!is.null(xtr$thresh)) tol = xtr$thresh
 
-  ## fixed shifts for poisson
+  ## max re-weights
+  if(is.null(xtr$maxrw)) xtr$maxrw = maxit # practically inf
+  maxrw = xtr$maxrw
+
+  ## fixed shifts 
   eta <- rep(0.0,n)
   if(!is.null(xtr$fix)){
     if(family=="gaussian") y = y-xtr$fix
@@ -54,45 +56,58 @@ gamlr <- function(x, y,
   stopifnot(length(eta)==n)
   eta <- as.double(eta)
 
-  ## observation weights
-  if(!is.null(xtr$obsweight)){
-    obsweight <- xtr$obsweight
-    stopifnot(all(obsweight>0))
-    stopifnot(length(obsweight)==n)
-  } else obsweight <- as.double(rep(1,n))
+  ## get x dimension and names
+  if(is.null(x)){
+    if(any(c(family!="gaussian",
+      is.null(xtr$vxx),
+      is.null(xtr$vxy),
+      is.null(xtr$vxsum),
+      is.null(xtr$xbar))))
+        stop("xx,xy,xsum,xbar are NULL or family!=`gaussian'; 
+          this is not allowed if x=NULL")
+    p <- length(xtr$xbar)
+    varnames <- names(xtr$xbar) 
+    x <- Matrix(0)
+  } else{
+    if(inherits(x,"numeric")) x <- matrix(x)
+    if(inherits(x,"data.frame")) x <- as.matrix(x)
+    if(inherits(x,"simple_triplet_matrix"))
+      x <- sparseMatrix(i=x$i,j=x$j,x=x$v,
+              dims=dim(x),dimnames=dimnames(x))
+    p <- ncol(x)
+    varnames <- colnames(x)
+    stopifnot(nrow(x)==n) 
+  }
+  if(is.null(varnames)) varnames <- 1:p
 
-  ## precalc of x'x
-  doxx = doxx & (family=="gaussian")
-  if(doxx){
-    if(is.null(xtr$xx))
-      xtr$xx <- as(
-        tcrossprod(t(x*sqrt(obsweight))),
-        "matrix")
-    xx <- as(xtr$xx,"dspMatrix")
-    if(xx@uplo=="L") xx <- t(xx)
-    xx <- as.double(xx@x)
-  } else xx <- double(0) 
-
-  ## final x formatting
-  x=as(x,"dgCMatrix") 
-  if(is.null(colnames(x))) 
-    colnames(x) <- 1:p
-  stopifnot(nrow(x)==n) 
-
-  ## variable weights
-  if(!is.null(xtr$varweight)){
-    varweight <- xtr$varweight
-    stopifnot(all(varweight>=0))
-    stopifnot(length(varweight)==p)
-  } else{ varweight <- rep(1,p) }
+  ## unpenalized columns
+  if(length(free)==0) free <- NULL
+  if(!is.null(free)){
+    if(inherits(free,"character")){
+      free <- na.omit(match(free,varnames))
+      if(length(free)==0) free <- NULL
+      print(free)}
+    if(any(free < 1) | any(free>p)) stop("bad free argument.") 
+    if(length(free)==p){
+      nlambda <- 1
+      lambda.start <- 0
+    }
+  }
+  
+  ## variable (penalty) weights
+  if(is.null(varweight)) varweight <- rep(1,p)
+  stopifnot(all(varweight>=0))
+  stopifnot(length(varweight)==p)
   varweight[free] <- 0
-  varweight <- as.double(varweight)
 
   ## check and clean all arguments
   stopifnot(lambda.min.ratio<=1)
   stopifnot(all(c(nlambda,lambda.min.ratio)>0))
   stopifnot(all(c(lambda.start)>=0))
   stopifnot(all(c(tol,maxit)>0))
+  if(lambda.start==0){
+    nlambda <- 1
+    standardize <- 0 }
   lambda <- double(nlambda)
   lambda[1] <- lambda.start
 
@@ -108,6 +123,39 @@ gamlr <- function(x, y,
   stopifnot(length(gamvec)==p)
   gamvec[free] <- 0
 
+  ## PREXX stuff
+  prexx = (prexx | !is.null(xtr$vxx)) & (family=="gaussian")
+  if(prexx){
+    if(is.null(xtr$xbar))
+      xtr$xbar <- colMeans(x)
+    xbar <- as.double(xtr$xbar)
+    if(is.null(xtr$vxsum))
+      xtr$vxsum <- colSums(x*obsweight)
+    vxsum <- as.double(xtr$vxsum)
+    if(is.null(xtr$vxx))
+      xtr$vxx <- crossprod(x*sqrt(obsweight))
+    vxx <- Matrix(xtr$vxx,sparse=FALSE)
+    vxx <- as(vxx,"dspMatrix")
+    stopifnot(ncol(vxx)==p)
+    if(vxx@uplo=="L") vxx <- t(vxx)
+    vxx <- as.double(vxx@x)
+    if(is.null(xtr$vxy))
+      xtr$vxy <- drop(crossprod(x,y*obsweight))
+    vxy <- as.double(drop(xtr$vxy))
+    stopifnot(all(p==
+      c(length(xbar),length(vxsum),length(vxy))))
+  } else{
+    xbar <- double(p)
+    vxsum <- double(p)
+    vxy <- double(p)
+    vxx <- double(0)
+  }
+
+  ## final x formatting
+  x=as(x,"dgCMatrix") 
+  stopifnot(all(is.finite(x@x)))
+
+
   ## drop it like it's hot
   fit <- .C("gamlr",
             famid=as.integer(famid), 
@@ -118,17 +166,21 @@ gamlr <- function(x, y,
             xp=x@p,
             xv=as.double(x@x),
             y=y,
-            doxx=as.integer(doxx),
-            xx=xx,
+            prexx=as.integer(prexx),
+            xbar=xbar,
+            xsum=vxsum,
+            xx=vxx,
+            xy=vxy,
             eta=eta,
-            varweight=varweight,
-            obsweight=obsweight,
+            varweight=as.double(varweight),
+            obsweight=as.double(obsweight),
             standardize=as.integer(standardize>0),
             nlambda=as.integer(nlambda),
             delta=as.double(delta),
             gamma=gamvec,
             tol=as.double(tol),
-            maxit=as.integer(maxit),
+            maxit=as.integer(rep(maxit,nlambda)),
+            maxrw=as.integer(rep(maxrw,nlambda)),
             lambda=as.double(lambda),
             deviance=double(nlambda),
             df=double(nlambda),
@@ -148,6 +200,9 @@ gamlr <- function(x, y,
     fit$deviance <- NA
   }
 
+  if(any(fit$exits==1)) 
+    warning("numerically perfect fit for some observations.")
+
   alpha <- head(fit$alpha,nlambda)
   names(alpha) <- paste0('seg',(1:nlambda))
   beta <- Matrix(head(fit$beta,nlambda*p),
@@ -161,6 +216,11 @@ gamlr <- function(x, y,
   df <- head(fit$df,nlambda)
   names(df) <- names(dev) <- names(lambda) <- names(alpha)
 
+  ## iterations
+  iter <- cbind(ncycle=head(fit$maxit,nlambda),
+                nreweight=head(fit$maxrw,nlambda))
+  rownames(iter) <- names(alpha)
+
   ## build return object and exit
   out <- list(lambda=lambda, 
              gamma=gamma,
@@ -170,14 +230,24 @@ gamlr <- function(x, y,
              beta=beta, 
              df=df,
              deviance=dev,
-             totalpass=fit$maxit,
+             iter=iter,
              free=free,
              call=sys.call(1)) 
 
   class(out) <- "gamlr"
   invisible(out)
 }
- 
+
+## just response argument checking
+checky <- function(y, family){ 
+  if(is.data.frame(y)) y <- as.matrix(y)
+  y <- drop(y)
+  stopifnot(is.null(dim(y)))
+  if(is.factor(y)&family=="binomial") y <- as.numeric(y)-1
+  stopifnot(all(is.finite(y)))
+  return(as.double(y))
+}
+
 
 #### S3 method functions
 
@@ -190,7 +260,7 @@ plot.gamlr <- function(x, against=c("pen","dev"),
     x$beta <- x$beta[-x$free,,drop=FALSE]
   p <- nrow(x$beta) 
   nzr <- unique(x$beta@i)+1
-  if(length(nzr)==0) return("nothing to plot")
+  if(length(nzr)==0 | (x$lambda[1]==0)) return("nothing to plot")
   beta <- as.matrix(x$beta[nzr,,drop=FALSE])
 
   if(!is.null(col)){
@@ -208,7 +278,8 @@ plot.gamlr <- function(x, against=c("pen","dev"),
   } else
     stop("unrecognized 'against' argument.")
 
-  if(!is.finite(xv[1])) stop("refusing to plot an unconverged fit")
+  if(!is.finite(xv[1])) 
+    stop("refusing to plot an unconverged fit")
 
   argl = list(...)
   if(is.null(argl$ylim)) argl$ylim=range(beta)

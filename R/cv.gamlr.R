@@ -3,10 +3,11 @@
 ###########################################################
 
 ## just an R loop that calls gamlr
-cv.gamlr <- function(x, y, nfold=5, foldid=NULL, verb=FALSE, ...){
+cv.gamlr <- function(x, y, nfold=5, foldid=NULL, verb=FALSE, cl=NULL, ...){
   
   full <- gamlr(x,y, ...)
   fam <- full$family
+  y <- checky(y,fam)
 
   nobs <- full$nobs
   if(is.null(foldid)){
@@ -23,14 +24,20 @@ cv.gamlr <- function(x, y, nfold=5, foldid=NULL, verb=FALSE, ...){
   argl$nlambda <- length(lambda)
   argl$lambda.min.ratio <- tail(lambda,1)/lambda[1]
 
+  ## remove any pre-calculated summaries
+  argl$vxx <- argl$vxsum <- argl$vxy <- argl$xbar <- NULL
+
   oos <- matrix(Inf, nrow=nfold, ncol=argl$nlambda,
                 dimnames=list(levels(foldid),names(lambda)))
 
   if(verb) cat("fold ")
-  for(k in levels(foldid)){
+
+  ## define the folddev function
+  folddev <- function(k){
+    require(gamlr)
     train <- which(foldid!=k)
-    fit <- do.call(gamlr, 
-      c(list(x=x[train,],y=y[train]), argl))
+    suppressWarnings(fit <- do.call(gamlr, 
+      c(list(x=x[train,],y=y[train]), argl)))
     eta <- predict(fit, x[-train,], select=0)
 
     dev <- apply(eta,2, 
@@ -45,10 +52,27 @@ cv.gamlr <- function(x, y, nfold=5, foldid=NULL, verb=FALSE, ...){
                       y[-train]*log(y[-train]),
                       0.0) - y[-train]) 
       dev <- dev + 2*satnllhd }
-    oos[k,1:length(fit$lambda)] <- dev 
     if(verb) cat(sprintf("%s,",k))
+    if(length(dev) < argl$nlambda) 
+      dev <- c(dev,rep(Inf,argl$nlambda-length(dev)))
+    return(dev)
   }
-  
+
+  # apply the folddev function
+  if(!is.null(cl)){
+    if (requireNamespace("parallel", quietly = TRUE)) {
+      parallel::clusterExport(cl,
+        c("x","y","foldid","argl","fam","verb"), 
+        envir=environment())
+      oos <- t(parallel::parSapply(cl,1:nfold,folddev))
+    } else {
+      warning("cl is not NULL, but parallle package unavailable.")
+      cl <- NULL
+    }
+  }
+  if(is.null(cl)) 
+    oos <- t(sapply(1:nfold,folddev))
+
   cvm <- apply(oos,2,mean)
   cvs <- apply(oos,2,sd)/sqrt(nfold-1)
 
@@ -76,7 +100,7 @@ cv.gamlr <- function(x, y, nfold=5, foldid=NULL, verb=FALSE, ...){
 
 ## S3 method functions
 
-plot.cv.gamlr <- function(x, ...){
+plot.cv.gamlr <- function(x, select=TRUE, ...){
 
   argl = list(...)
 
@@ -104,8 +128,9 @@ plot.cv.gamlr <- function(x, ...){
   argl$type <- NULL
   suppressWarnings(do.call(points, argl))
 
-  abline(v=log(x$lambda.min), lty=3, col="grey20")
-  abline(v=log(x$lambda.1se), lty=3, col="grey20")
+  if(select){
+    abline(v=log(x$lambda.min), lty=3, col="grey20")
+    abline(v=log(x$lambda.1se), lty=3, col="grey20") }
 
   dfi <- unique(round(
     seq(1,length(argl$x),length=ceiling(length(axTicks(1))))))

@@ -9,12 +9,11 @@
 \usage{
 gamlr(x, y, 
    family=c("gaussian","binomial","poisson"),
-   gamma=0,
-   nlambda=100, lambda.start=Inf,  
-   lambda.min.ratio=0.01, free=NULL, 
-   standardize=TRUE, doxx=n>0.5*(p^2),
-   tol=1e-7, maxit=1e4,
-   verb=FALSE, ...)
+   gamma=0,nlambda=100, lambda.start=Inf,  
+   lambda.min.ratio=0.01, free=NULL, standardize=TRUE, 
+   obsweight=NULL,varweight=NULL,
+   prexx=(p<500),
+   tol=1e-7,maxit=1e4,verb=FALSE, ...)
 
 \method{plot}{gamlr}(x, against=c("pen","dev"), 
     col=NULL, select=TRUE, df=TRUE, ...)
@@ -31,7 +30,7 @@ gamlr(x, y,
       This should not include the intercept.}
   \item{y}{A vector of response values. 
       There is almost no argument checking, 
-      so be careful to match \code{y} with the appropriate \code{family}. 
+      so be careful to match \code{y} with the appropriate \code{family}
       }
   \item{family}{ Response model type; 
   either "gaussian", "poisson", or "binomial".  
@@ -53,14 +52,17 @@ gamlr(x, y,
     the coefficients to have standard deviation of one.  
     This is equivalent to multiplying the L1 penalty 
     by each coefficient standard deviation. }
-  \item{doxx}{ For \code{family="gaussian"} only, whether to pre-calculate \eqn{x'x} 
-      and use gradient caluculations based on this inner product.  This can lead to massive speed-ups for big-n datasets.}
-  \item{verb}{ Whether to print some output for each path segment. }
+  \item{obsweight}{For \code{family="gaussian"} only, weights on each observation in the weighted least squares objective.  For
+  other resonse families, \code{obsweights} are overwritten by IRLS weights.  Defaults to \code{rep(1,n)}.}
+  \item{varweight}{Multipliers on the penalty associated with each covariate coefficient.  Must be non-negative. These are further multiplied by \eqn{sd(x_j)} if \code{standardize=TRUE}.  Defaults to \code{rep(1,p)}.}
+  \item{prexx}{ Only possible for \code{family="gaussian"}: whether to use pre-calculated weighted variable covariances in gradient calculations.  This leads to massive speed-ups for big-n datasets, but can be slow for \eqn{p>n} datasets. See note.
+  }
   \item{tol}{ Optimization convergence tolerance relative to the null model deviance for each 
     inner coordinate-descent loop.  This is measured against the 
     maximum coordinate change times deviance curvature after full parameter-set update. }
   \item{maxit}{ Max iterations for a single segment
          coordinate descent routine. }
+  \item{verb}{ Whether to print some output for each path segment. }
    \item{object}{ A gamlr object.}
   \item{against}{ Whether to plot paths 
   against log penalty or deviance.}
@@ -105,11 +107,13 @@ to the same domain as \code{y}.}
   \item{df}{Approximate degrees of freedom.}
   \item{deviance}{Fitted deviance: 
   \eqn{(-2/\phi)}( logLHD.fitted - logLHD.saturated ). }
-  \item{totalpass}{Total number of coordinate descent cycles. }
+  \item{iter}{Number of optimization iterations by segment, broken into coordinate descent cycles and IRLS re-weightings for \code{family!="gaussian"}. }
   \item{family}{The exponential family model.}
 }
 \author{
   Matt Taddy \email{taddy@chicagobooth.edu}
+}
+\note{Under \code{prexx=TRUE} (requires \code{family="gaussian"}), weighted covariances \eqn{(VX)'X} and \eqn{(VX)'y}, weighted column sums of \eqn{VX}, and column means \eqn{\bar{x}} will be pre-calculated. Here \eqn{V} is the diagonal matrix of least squares weights (\code{obsweights}, so \eqn{V} defaults to \eqn{I}).  It is not necessary (they will be built by \code{gamlr} otherwise), but you have the option to pre-calculate these sufficient statistics yourself as arguments \code{vxx} (\code{matrix} or \code{dspMatrix}), \code{vxy}, \code{vxsum}, and \code{xbar} (all \code{vectors}) respectively.  Search \code{PREXX} in \code{gamlr.R} to see the steps involved, and notice that there is very little argument checking -- do at your own risk.  Note that \code{xbar} is an \emph{unweighted} calculation, even if \eqn{V \neq I}.   For really Big Data you can then run with \code{x=NULL} (e.g., if these statistics were calculated on distributed machines and full design is unavailable). \emph{Beware:} in this \code{x=NULL} case our deviance (and df, if \code{gamma>0}) calculations are incorrect and selection rules will always return the smallest-lambda model.
 }
 \references{Taddy (2013), The Gamma Lasso, http://arxiv.org/abs/1308.5623}
 
@@ -131,7 +135,7 @@ fitglbv <- gamlr(x, y, gamma=10, lambda.min.ratio=1e-3) # big gamma
 
 par(mfrow=c(1,3))
 ylim = range(c(fitglbv$beta@x))
-plot(fitlasso, ylim=ylim)
+plot(fitlasso, ylim=ylim, col="navy")
 plot(fitgl, ylim=ylim, col="maroon")
 plot(fitglbv, ylim=ylim, col="darkorange")
 
