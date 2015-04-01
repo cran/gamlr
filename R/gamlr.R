@@ -15,7 +15,7 @@ gamlr <- function(x, y,
             varweight=NULL,
             prexx=(p<500),  
             tol=1e-7, 
-            maxit=1e4,
+            maxit=1e5,
             verb=FALSE, ...)
 {
   on.exit(.C("gamlr_cleanup", PACKAGE = "gamlr"))
@@ -41,8 +41,11 @@ gamlr <- function(x, y,
   ## extras
   xtr = list(...)
 
-  ## aliases from glmnet or previous gamlr terminology
+  ## aliases from glmnet or other gamlr terminology
   if(!is.null(xtr$thresh)) tol = xtr$thresh
+  if(!is.null(xtr$lmr)) lambda.min.ratio = xtr$lmr
+  if(!is.null(xtr$scale)) standardize = xtr$scale
+  if(!is.null(xtr[['fix']])) xtr$shift = xtr$fix
 
   ## max re-weights
   if(is.null(xtr$maxrw)) xtr$maxrw = maxit # practically inf
@@ -50,9 +53,9 @@ gamlr <- function(x, y,
 
   ## fixed shifts 
   eta <- rep(0.0,n)
-  if(!is.null(xtr$fix)){
-    if(family=="gaussian") y = y-xtr$fix
-    else eta <- xtr$fix   } 
+  if(!is.null(xtr$shift)){
+    if(family=="gaussian") y = y-xtr$shift
+    else eta <- xtr$shift   } 
   stopifnot(length(eta)==n)
   eta <- as.double(eta)
 
@@ -79,6 +82,13 @@ gamlr <- function(x, y,
     stopifnot(nrow(x)==n) 
   }
   if(is.null(varnames)) varnames <- 1:p
+
+  # fixedcost (undocumented: additional fixed l1 penalty)
+  if(is.null(xtr$fixedcost))
+    xtr$fixedcost <- 0
+  fixedcost = xtr$fixedcost
+  if(length(fixedcost)!=p){ 
+      fixedcost <- rep(fixedcost[1],p) }
 
   ## unpenalized columns
   if(length(free)==0) free <- NULL
@@ -178,6 +188,7 @@ gamlr <- function(x, y,
             nlambda=as.integer(nlambda),
             delta=as.double(delta),
             gamma=gamvec,
+            fixedcost=as.double(fixedcost),
             tol=as.double(tol),
             maxit=as.integer(rep(maxit,nlambda)),
             maxrw=as.integer(rep(maxrw,nlambda)),
@@ -207,7 +218,7 @@ gamlr <- function(x, y,
   names(alpha) <- paste0('seg',(1:nlambda))
   beta <- Matrix(head(fit$beta,nlambda*p),
                     nrow=p, ncol=nlambda, 
-                    dimnames=list(colnames(x),names(alpha)),
+                    dimnames=list(varnames,names(alpha)),
                     sparse=TRUE)
 
   ## path stats
@@ -303,8 +314,10 @@ plot.gamlr <- function(x, against=c("pen","dev"),
 
 coef.gamlr <- function(object, select=NULL, k=2, ...)
 {
-  if(length(select)==0)
+  if(length(select)==0){
     select <- which.min(AICc(object,k=k))
+    if(length(select)==0) select <- 1
+  }
   else if(select==0)
    select <- 1:ncol(object$beta)
 
@@ -356,8 +369,8 @@ summary.gamlr <- function(object, ...){
 print.gamlr <- function(x, ...){
   cat("\n")
   cat(sprintf(
-    "gamma = %g %s gamlr with %d inputs and %d segments.", 
-    x$gamma, x$family, nrow(x$beta), ncol(x$beta)))
+    "%s gamlr with %d inputs and %d segments.", 
+    x$family, nrow(x$beta), ncol(x$beta)))
   cat("\n\n")
 }
 
