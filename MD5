@@ -1,4 +1,4 @@
-9c1dcd88fa4698a3c27185a023babc22 *DESCRIPTION
+5d8468ed5804cb561c891046adfdac5e *DESCRIPTION
 18d35777d6bc128ab8a01ebfdf4b6bfb *NAMESPACE
 443dd0b83788b23e9eb11509946f7df5 *R/AICc.R
 48a567ad3db6143f39badd26c714f441 *R/cv.gamlr.R
@@ -12,7 +12,7 @@ cbb4edb472f79b93f04dc13871ea1073 *inst/CITATION
 eb63eeb690db9287ee3d7ba115c5c1f5 *man/gamlr.Rd
 1b85dc01ecab289c8e574c82e823155d *man/hockey.Rd
 33e91a2cba53553a4794a17b120d402c *src/Makevars
-175a4338d558b9eabe768c59e1247f9d *src/gamlr.c
+cbac3983fb735287a913d80b266b1835 *src/gamlr.c
 eac0ee8259f9141ff10ec9db1cc19497 *src/gui.c
 6a84cc2b480a238ec8ffc7d55c9fb8c3 *src/gui.h
 ffcf5e115f9252ec3f355325abf1f10d *src/lhd.c
