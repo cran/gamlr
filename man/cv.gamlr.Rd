@@ -7,7 +7,7 @@
 \description{Cross validation for gamma lasso penalty selection. }
 \usage{
 cv.gamlr(x, y, nfold=5, foldid=NULL, verb=FALSE, cl=NULL, ...)
-\method{plot}{cv.gamlr}(x, select=TRUE, ...)
+\method{plot}{cv.gamlr}(x, select=TRUE, df=TRUE, ...)
 \method{coef}{cv.gamlr}(object, select=c("1se","min"), ...)
 \method{predict}{cv.gamlr}(object, newdata, select=c("1se","min"), ...)
 }
@@ -26,6 +26,7 @@ cv.gamlr(x, y, nfold=5, foldid=NULL, verb=FALSE, cl=NULL, ...)
   \code{select="min"} is that with minimum average OOS deviance,
   and  \code{select="1se"} is that whose average OOS deviance is
   no more than 1 standard error away from the minimum. In \code{plot}, whether to draw these selections.}
+  \item{df}{ Whether to add to the plot degrees of freedom along the top axis.}
 }
 \details{ Fits a \code{gamlr} regression to the full dataset, and then performs \code{nfold} 
 cross validation to evaluate out-of-sample (OOS)
@@ -46,9 +47,9 @@ shows mean OOS deviance with 1se error bars.
   \item{lambda.1se}{ Penalty at \code{1se} \code{cvm}. }
  }
 \author{
-  Matt Taddy \email{taddy@chicagobooth.edu}
+  Matt Taddy \email{mataddy@gmail.com}
 }
-\references{Taddy (2013), The Gamma Lasso, http://arxiv.org/abs/1308.5623}
+\references{Taddy (2017 JCGS), One-Step Estimator Paths for Concave Regularization, http://arxiv.org/abs/1308.5623}
 
 \examples{
 

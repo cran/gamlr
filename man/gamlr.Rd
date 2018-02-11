@@ -17,7 +17,7 @@ gamlr(x, y,
 
 \method{plot}{gamlr}(x, against=c("pen","dev"), 
     col=NULL, select=TRUE, df=TRUE, ...)
-\method{coef}{gamlr}(object, select=NULL, k=2, ...)
+\method{coef}{gamlr}(object, select=NULL, k=2, corrected=TRUE, ...)
 \method{predict}{gamlr}(object, newdata,
             type = c("link", "response"), ...)
 \method{logLik}{gamlr}(object, ...)
@@ -67,11 +67,12 @@ gamlr(x, y,
   \item{against}{ Whether to plot paths 
   against log penalty or deviance.}
 \item{select}{ In \code{coef} (and \code{predict}, which calls \code{coef}), the index of path segments
-  for which you want coefficients or prediction (e.g., do \code{select=which.min(BIC(object))} for BIC selection).  If null, the segments are selected via our \emph{corrected} \code{AICc} function with \code{k} as specified.  If \code{select=0} all segments are returned.
+  for which you want coefficients or prediction (e.g., do \code{select=which.min(BIC(object))} for BIC selection).  If null, the segments are selected via our \code{AICc} function with \code{k} as specified (see also \code{corrected}).  If \code{select=0} all segments are returned.
 
   In \code{plot},
   \code{select} is just a flag for whether to add lines marking AICc and BIC selected models.}
 \item{k}{ If \code{select=NULL} in \code{coef} or \code{predict}, the \code{AICc} complexity penalty.  \code{k} defaults to the usual 2. }
+\item{corrected}{ A flag that swaps corrected (for high dimensional bias) \code{AICc} in for the standard \code{AIC}.  You almost always want \code{corrected=TRUE}, unless you want to apply the BIC in which case use \code{k=log(n), corrected=FALSE}. }
 \item{newdata}{ New \code{x} data for prediction.}
 \item{type}{ Either "link" for the linear equation, 
 or "response" for predictions transformed 
@@ -111,11 +112,11 @@ to the same domain as \code{y}.}
   \item{family}{The exponential family model.}
 }
 \author{
-  Matt Taddy \email{taddy@chicagobooth.edu}
+  Matt Taddy \email{mataddy@gmail.com}
 }
 \note{Under \code{prexx=TRUE} (requires \code{family="gaussian"}), weighted covariances \eqn{(VX)'X} and \eqn{(VX)'y}, weighted column sums of \eqn{VX}, and column means \eqn{\bar{x}} will be pre-calculated. Here \eqn{V} is the diagonal matrix of least squares weights (\code{obsweights}, so \eqn{V} defaults to \eqn{I}).  It is not necessary (they will be built by \code{gamlr} otherwise), but you have the option to pre-calculate these sufficient statistics yourself as arguments \code{vxx} (\code{matrix} or \code{dspMatrix}), \code{vxy}, \code{vxsum}, and \code{xbar} (all \code{vectors}) respectively.  Search \code{PREXX} in \code{gamlr.R} to see the steps involved, and notice that there is very little argument checking -- do at your own risk.  Note that \code{xbar} is an \emph{unweighted} calculation, even if \eqn{V \neq I}.   For really Big Data you can then run with \code{x=NULL} (e.g., if these statistics were calculated on distributed machines and full design is unavailable). \emph{Beware:} in this \code{x=NULL} case our deviance (and df, if \code{gamma>0}) calculations are incorrect and selection rules will always return the smallest-lambda model.
 }
-\references{Taddy (2013), The Gamma Lasso, http://arxiv.org/abs/1308.5623}
+\references{Taddy (2017 JCGS), One-Step Estimator Paths for Concave Regularization, http://arxiv.org/abs/1308.5623}
 
 \examples{
 

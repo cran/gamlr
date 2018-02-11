@@ -20,6 +20,7 @@ cv.gamlr <- function(x, y, nfold=5, foldid=NULL, verb=FALSE, cl=NULL, ...){
 
   argl <- list(...)
   if(!is.null(argl$shift)) shift <- argl$shift
+  if(!is.null(argl$obsweight)) obsweight <- argl$obsweight
   lambda <- as.double(full$lambda)
   argl$lambda.start <- lambda[1]
   argl$nlambda <- length(lambda)
@@ -28,9 +29,6 @@ cv.gamlr <- function(x, y, nfold=5, foldid=NULL, verb=FALSE, cl=NULL, ...){
   ## remove any pre-calculated summaries
   argl$vxx <- argl$vxsum <- argl$vxy <- argl$xbar <- NULL
 
-  oos <- matrix(Inf, nrow=nfold, ncol=argl$nlambda,
-                dimnames=list(levels(foldid),names(lambda)))
-
   if(verb) cat("fold ")
 
   ## define the folddev function
@@ -38,9 +36,10 @@ cv.gamlr <- function(x, y, nfold=5, foldid=NULL, verb=FALSE, cl=NULL, ...){
     require(gamlr)
     train <- which(foldid!=k)
     if(!is.null(argl$shift)) argl$shift <- shift[train]
+    if(!is.null(argl$obsweight)) argl$obsweight <- obsweight[train]
     suppressWarnings(fit <- do.call(gamlr, 
       c(list(x=x[train,],y=y[train]), argl)))
-    eta <- predict(fit, x[-train,], select=0)
+    eta <- predict(fit, x[-train,,drop=FALSE], select=0)
     if(!is.null(argl$shift)) eta <- eta + shift[-train]
 
     dev <- apply(eta,2, 
@@ -69,12 +68,16 @@ cv.gamlr <- function(x, y, nfold=5, foldid=NULL, verb=FALSE, cl=NULL, ...){
         envir=environment())
       oos <- t(parallel::parSapply(cl,1:nfold,folddev))
     } else {
-      warning("cl is not NULL, but parallle package unavailable.")
+      warning("cl is not NULL, but parallel package unavailable.")
       cl <- NULL
     }
   }
   if(is.null(cl)) oos <- t(sapply(1:nfold,folddev))
 
+  # fix dimension and names
+  oos <- matrix(oos, nrow=nfold, ncol=argl$nlambda,
+                dimnames=list(levels(foldid),names(lambda)))
+    
   cvm <- apply(oos,2,mean)
   cvs <- apply(oos,2,sd)/sqrt(nfold-1)
 
@@ -102,7 +105,7 @@ cv.gamlr <- function(x, y, nfold=5, foldid=NULL, verb=FALSE, cl=NULL, ...){
 
 ## S3 method functions
 
-plot.cv.gamlr <- function(x, select=TRUE, ...){
+plot.cv.gamlr <- function(x, select=TRUE, df=TRUE, ...){
 
   argl = list(...)
 
@@ -134,10 +137,12 @@ plot.cv.gamlr <- function(x, select=TRUE, ...){
     abline(v=log(x$lambda.min), lty=3, col="grey20")
     abline(v=log(x$lambda.1se), lty=3, col="grey20") }
 
-  dfi <- unique(round(
-    seq(1,length(argl$x),length=ceiling(length(axTicks(1))))))
-  axis(3,at=argl$x[dfi], 
-    labels=round(x$gamlr$df[dfi],1),tick=FALSE, line=-.5)
+  if(df){
+    dfi <- unique(round(
+      seq(1,length(argl$x),length=ceiling(length(axTicks(1))))))
+    axis(3,at=argl$x[dfi], 
+      labels=round(x$gamlr$df[dfi],1),tick=FALSE, line=-.5)
+  }
 
 }
 

@@ -56,8 +56,35 @@ double (*nllhd)(int, double, double*, double*, double*) = NULL;
 double (*reweight)(int, double, double*, 
                 double *, double*, double*, int*) = NULL;
 
+// old print functions, unused
+// void printArray(int *ptr, size_t length)          
+// {         
+//   //for statment to print values using array             
+//   size_t i = 0;
+//   for( ; i < length; ++i )      
+//     printf("%d", ptr[i]);        
+// }   
+
+// void printString(const char *ptr)          
+// {         
+//   //for statment to print values using array             
+//   for( ; *ptr!=NULL; ++ptr)        
+//     printf("%c", *ptr);        
+// }         
+
+
+// void printvec(double *ptr, int num){
+//   double *ptrval = &ptr[0];
+//   int idx;
+//   for(idx = 0; idx < num; idx++){
+//     printf("%f, %d \n", *(ptrval+idx), (ptrval+idx));
+//   }
+// }
+
+
+
 /* global cleanup function */
-void gamlr_cleanup(){
+void R_gamlr_cleanup(){
   if(!dirty) return;
   if(Z){ free(Z); Z = NULL; }
   if(B){ free(B); B = NULL; }
@@ -85,7 +112,8 @@ double Bmove(int j)
 }
 
 void donullgrad(void){
-  for(int j=0; j<p; j++)
+  int j = 0;
+  for(j=0; j<p; j++)
     if( (W[j]>0.0) & isfinite(W[j]) & (B[j]==0.0) ){
       ag0[j] = fabs(G[j])/W[j] - l1fixedcost[j]*nd;
       if(ag0[j]<0.0) ag0[j] = 0.0; 
@@ -113,18 +141,22 @@ double getdf(double L){
 }
 
 void doxbar(void){
-  for(int j=0; j<p; j++){
+  int j = 0;
+  for(j=0; j<p; j++){
       xbar[j] = 0.0;
-      for(int i=xp[j]; i<xp[j+1]; i++) 
+      int i;
+      for(i=xp[j]; i<xp[j+1]; i++) 
         xbar[j] += xv[i];
       xbar[j] *= 1.0/nd; }
 }
 
 void docurve(void){
   double vx;  
-  for(int j=0; j<p; j++){
+  int j;
+  for(j=0; j<p; j++){
     H[j] = vxsum[j] = vxz[j] = 0.0;
-    for(int i=xp[j]; i<xp[j+1]; i++){
+    int i;
+    for(i=xp[j]; i<xp[j+1]; i++){
       vx = V[xi[i]]*xv[i];
       vxsum[j] += vx;
       vxz[j] += vx*Z[xi[i]];
@@ -145,7 +177,8 @@ void dograd(int j){
       G[j] += vxx[k*(k+1)/2 + j]*B[k];
   } 
   else{
-    for(int i=xp[j]; i<xp[j+1]; i++) 
+    int i;
+    for(i=xp[j]; i<xp[j+1]; i++) 
         G[j] += V[xi[i]]*xv[i]*E[xi[i]];
   }
 }
@@ -154,7 +187,7 @@ void dograd(int j){
 int cdsolve(double tol, int M, int RW)
 {
   int rw,t,i,j,dozero,dopen,exitstat; 
-  double dbet,imove,Bdiff;
+  double dbet,Bdiff;
 
   // initialize
   dopen = isfinite(ntimeslam);
@@ -168,7 +201,6 @@ int cdsolve(double tol, int M, int RW)
   while( (Bdiff > tol) | dozero ){
 
     Bdiff = 0.0;
-    imove = 0.0;
     if(dozero)
       if( (fam!=1) & (RW>rw) ){
           rw +=1;
@@ -241,12 +273,12 @@ int cdsolve(double tol, int M, int RW)
 }
 
 /*
- * Main Function: gamlr
+ * Main Function: _gamlr
  * path estimation of adaptively penalized coefficients
  *
  */
 
- void gamlr(int *famid, // 1 gaus, 2 bin, 3 pois
+ void R_gamlr(int *famid, // 1 gaus, 2 bin, 3 pois
             int *n_in, // nobs 
             int *p_in, // nvar
             int *N_in, // length of nonzero x entries
@@ -281,21 +313,28 @@ int cdsolve(double tol, int M, int RW)
   dirty = 1; // flag to say the function has been called
   // time stamp for periodic R interaction
   time_t itime = time(NULL);  
+//  printf("The color: %s\n", "blue");
   l1fixedcost = fixedcost;
 
   /** Build global variables **/
   fam = *famid;
   n = *n_in;
+//  printf("%d\n", n);
   p = *p_in;
+//  printf("%d\n", p);
   nd = (double) n;
   pd = (double) p;
   N = *N_in;
-
+//  printf("%d\n", N);
+  
+  
+  
   E = eta;
   Y = y_in;
-  Z = new_dup_dvec(Y,n);
-  ysum = sum_dvec(Y,n); 
-  ybar = ysum/nd;
+  Z = new_dup_dvec(Y,n); // duplicates the array in Y at another address via Z
+  ysum = sum_dvec(Y,n);  // take sum of all the elements of the array with pointer Y
+// printf("%f\n", ysum);
+  ybar = ysum/nd; // take the mean of all the elements of the array with pointer Y
 
   xi = xi_in;
   xp = xp_in;
@@ -306,14 +345,18 @@ int cdsolve(double tol, int M, int RW)
   vxx = vxx_in;
   vxz = vxy_in;
 
-  H = new_dvec(p);
-  W = varweight;
-  omega = drep(1.0,p);  // gamma lasso adaptations
-  V = obsweight;
-  vsum = sum_dvec(V,n);    
+  H = new_dvec(p); // create a vector H of all 0s of length p 
+  W = varweight; // loading the variable weight vector (this is just the pointer)
+  omega = drep(1.0,p);  // gamma lasso adaptations, a vector of all 1s of length p
+ // printvec(omega, p);
+  V = obsweight; // observation weight vector- defaults to all 1 usually - length n
+  //printvec(V, 10);
+  vsum = sum_dvec(V,n);  // take sum of the observation weights across all samples 
+ // printf("%f\n", vsum);
 
   if(prexx){
-    for(int j=0; j<p; j++)
+    int j;
+    for(j=0; j<p; j++)
       H[j] = vxx[j*(j+1)/2+j] 
         + xbar[j]*(xbar[j]*vsum - 2.0*vxsum[j]); 
   } 
@@ -321,13 +364,17 @@ int cdsolve(double tol, int M, int RW)
     doxbar();
     if(*standardize | (fam==1)) docurve(); 
   }
+  //printvec(H, p);
 
   if(*standardize){
-    for(int j=0; j<p; j++){
+    int j;
+    for(j=0; j<p; j++){
       if(fabs(H[j])<1e-10){ H[j]=0.0; W[j] = INFINITY; }
       else W[j] *= sqrt(H[j]/vsum);
     }
   }
+  
+  //printvec(W, p);
 
   A=0.0;
   B = new_dzero(p);
@@ -337,7 +384,7 @@ int cdsolve(double tol, int M, int RW)
   dof = dofvec;
 
   // some local variables
-  double Lold, NLLHD, NLsat;
+  double NLLHD, NLsat;
   int s;
 
   // family dependent settings
@@ -355,7 +402,8 @@ int cdsolve(double tol, int M, int RW)
       A = log(ybar);
       // nonzero saturated negative log likelihood
       NLsat = ysum;
-      for(int i=0; i<n; i++)
+      int i;
+      for(i=0; i<n; i++)
         if(Y[i]!=0) NLsat += -Y[i]*log(Y[i]);
       break;
     default: 
@@ -363,7 +411,8 @@ int cdsolve(double tol, int M, int RW)
       nllhd = &sse;
       NLsat=0.0;
       A = intercept(n, E, V, Z, vsum);
-      for(int j=0; j<p; j++) dograd(j);
+      int j;
+      for(j=0; j<p; j++) dograd(j);
   }
 
   NLLHD =  nllhd(n, A, E, Y, V);
@@ -384,7 +433,6 @@ int cdsolve(double tol, int M, int RW)
     // update parameters and objective
     maxit[s] = npass;
     maxrw[s] = nrw;
-    Lold = NLLHD;
     if( (s==0) | (N>0) ) 
       NLLHD =  nllhd(n, A, E, Y, V);
     deviance[s] = 2.0*(NLLHD - NLsat);
@@ -401,7 +449,8 @@ int cdsolve(double tol, int M, int RW)
     if(s==0) *thresh *= deviance[0]; // relativism
     
     // gamma lasso updating
-    for(int j=0; j<p; j++) 
+    int j;
+    for(j=0; j<p; j++) 
       if(gam[j]>0.0){
         if(isfinite(gam[j])){
           if( (W[j]>0.0) & isfinite(W[j]) ){
@@ -435,7 +484,7 @@ int cdsolve(double tol, int M, int RW)
   // deviance calcs are wrong for null X
   // so we just make the last model look best
   if( (N==0) & (s>0) ) deviance[*nlam-1] = 0.0;
-  gamlr_cleanup();
+  R_gamlr_cleanup();
 }
 
 
