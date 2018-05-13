@@ -1,6 +1,6 @@
 Package: gamlr
 Title: Gamma Lasso Regression
-Version: 1.13-4
+Version: 1.13-5
 Author: Matt Taddy <mataddy@gmail.com>  
 Maintainer: Matt Taddy <mataddy@gmail.com>
 Depends: R (>= 2.15), Matrix, methods, graphics, stats
@@ -9,6 +9,6 @@ Description: The gamma lasso algorithm provides regularization paths correspondi
 License: GPL-3
 URL: http://github.com/TaddyLab/gamlr
 NeedsCompilation: yes
-Packaged: 2018-02-11 18:06:01 UTC; Matt
+Packaged: 2018-05-13 17:57:44 UTC; Matt
 Repository: CRAN
-Date/Publication: 2018-02-11 20:41:20 UTC
+Date/Publication: 2018-05-13 18:23:12 UTC

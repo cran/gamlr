@@ -34,7 +34,7 @@ Matt Taddy, \email{mataddy@gmail.com}
 \examples{
 ## design 
 data(hockey)
-x <- cBind(config,team,player)
+x <- cbind(config,team,player)
 y <- goal$homegoal
 
 ## fit the plus-minus regression model
@@ -42,7 +42,6 @@ y <- goal$homegoal
 fit <- gamlr(x, y, gamma=10, lambda.min.ratio=0.1,
   free=1:(ncol(config)+ncol(team)),
   standardize=FALSE, family="binomial")
-plot(fit)
 
 ## look at estimated player [career] effects
 B <- coef(fit)[colnames(player),]
